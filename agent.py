@@ -94,7 +94,51 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     """
     # TODO: implement the planning loop
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+    
+    # Step 2: Parse query
+    import json
+    from tools import _get_groq_client
+    
+    client = _get_groq_client()
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "Extract search parameters from the user query. Output ONLY valid JSON with keys: description (string), size (string or null), max_price (float or null)."},
+                {"role": "user", "content": query}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0
+        )
+        parsed = json.loads(response.choices[0].message.content)
+    except Exception as e:
+        # Fallback to simple parsing if LLM fails
+        parsed = {"description": query, "size": None, "max_price": None}
+        
+    session["parsed"] = parsed
+    
+    # Step 3: Search listings
+    results = search_listings(
+        description=parsed.get("description", query),
+        size=parsed.get("size"),
+        max_price=parsed.get("max_price")
+    )
+    session["search_results"] = results
+    
+    if not results:
+        session["error"] = "No listings found matching your description. Try broadening your search or checking spelling."
+        return session
+        
+    # Step 4: Select item
+    session["selected_item"] = results[0]
+    
+    # Step 5: Suggest outfit
+    session["outfit_suggestion"] = suggest_outfit(session["selected_item"], session["wardrobe"])
+    
+    # Step 6: Create fit card
+    session["fit_card"] = create_fit_card(session["outfit_suggestion"], session["selected_item"])
+    
+    # Step 7: Return session
     return session
 
 
