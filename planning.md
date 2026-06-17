@@ -73,7 +73,12 @@ If the outfit string is empty or missing, the tool handles it by returning a des
 ## Planning Loop
 
 **How does your agent decide which tool to call next?**
-The agent follows a linear, sequential pipeline. It first parses the user's query into parameters (description, size, max_price). It calls `search_listings`. If results are found, it selects the top item and passes it to `suggest_outfit` along with the wardrobe. Finally, it passes the outfit suggestion and selected item to `create_fit_card`. It knows it's done when all three tools have executed successfully. If `search_listings` returns empty, the loop aborts early.
+First, initialize `session` using `_new_session()`. 
+Second, parse the `query` into `description`, `size`, and `max_price`. 
+Third, call `search_listings(description, size, max_price)`. Check if `results` is empty. If yes, set `session["error"] = "No listings found matching your description."` and return `session` early. If no, set `session["selected_item"] = results[0]`. 
+Fourth, call `suggest_outfit(session["selected_item"], wardrobe)`. Set `session["outfit_suggestion"]` to the string returned. 
+Fifth, call `create_fit_card(session["outfit_suggestion"], session["selected_item"])`. Set `session["fit_card"]` to the string returned. 
+Finally, return the `session`.
 
 ---
 
@@ -90,27 +95,40 @@ For each tool, describe the specific failure mode you're handling and what the a
 
 | Tool | Failure mode | Agent response |
 |------|-------------|----------------|
-| search_listings | No results match the query | Set `session["error"]` to a helpful message and abort early. |
-| suggest_outfit | Wardrobe is empty | Prompt LLM for general styling advice instead of specific combinations. |
-| create_fit_card | Outfit input is missing or incomplete | Return a descriptive error message string instead of a caption. |
+| search_listings | No results match the query | Set `session["error"]` to `"No listings found matching your description. Try broadening your search or checking spelling."` and return the session early. |
+| suggest_outfit | Wardrobe is empty | Prompt LLM with the new item but ask for general styling advice, returning a string like: `"Since your wardrobe is empty, here's some general styling advice for this piece:"` followed by the LLM output. |
+| create_fit_card | Outfit input is missing or incomplete | Return a descriptive error message string like `"Error: Cannot generate fit card because outfit data is missing."` instead of a caption. |
 
 ---
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    User([User Query & Wardrobe]) --> Init[Initialize Session Dict]
-    Init --> Parse[Parse Query: desc, size, price]
-    Parse --> Tool1(search_listings)
-    
-    Tool1 -- "Results Found" --> Tool2(suggest_outfit)
-    Tool1 -- "Empty List" --> Error1[Set session error & Return]
-    
-    Tool2 --> Tool3(create_fit_card)
-    Tool3 --> Output([Display to User])
-    
-    Error1 --> Output
+```text
+User query & Wardrobe
+    │
+    ▼
+Planning Loop ───────────────────────────────────────────┐
+    │                                                    │
+    ├─► Parse Query (desc, size, price)                  │
+    │       │                                            │
+    ├─► search_listings(description, size, max_price)    │
+    │       │ results=[]                                 │
+    │       ├──► [ERROR] "No listings found..." → return │
+    │       │                                            │
+    │       │ results=[item, ...]                        │
+    │       ▼                                            │
+    │   Session: selected_item = results[0]              │
+    │       │                                            │
+    ├─► suggest_outfit(selected_item, wardrobe)          │
+    │       │                                            │
+    │   Session: outfit_suggestion = "..."               │
+    │       │                                            │
+    └─► create_fit_card(outfit_suggestion, selected_item)│
+            │                                            │
+        Session: fit_card = "..."                        │
+            │                                            └─ error path returns here
+            ▼
+        Return session
 ```
 
 ---
@@ -118,15 +136,15 @@ flowchart TD
 ## AI Tool Plan
 
 **Milestone 3 — Individual tool implementations:**
-- I will provide the agent with the `tools.py` docstrings and the `planning.md` tool specs.
-- For `search_listings`, I will ask the AI to implement the scoring logic based on keyword overlap with the description.
-- For `suggest_outfit` and `create_fit_card`, I will ask the AI to write the Groq LLM prompts, making sure to handle the empty wardrobe edge case correctly.
-- I will verify by running `tools.py` directly and writing small test scripts before integrating.
+- I will use **Claude** for this.
+- For `search_listings`, I'll give Claude the Tool 1 block from `planning.md` (inputs, return value, failure mode) and ask it to implement the function using `load_listings()` from the data loader. Before trusting it, I'll check that the generated code filters by all three parameters and handles the empty-results case, and I'll test it with 3 queries.
+- For `suggest_outfit` and `create_fit_card`, I'll give Claude the Tool 2 and Tool 3 blocks from `planning.md` and ask it to write the Groq LLM prompts. I'll verify the output by manually inspecting the prompt text to ensure it covers the empty wardrobe condition and style guidelines.
 
 **Milestone 4 — Planning loop and state management:**
-- I will provide the AI with the architecture diagram and the `agent.py` docstrings.
-- I will ask it to write the `run_agent` sequential logic and query parsing logic (using regex or an LLM call).
-- I will verify by running `agent.py` in the terminal to see if the "Happy path" and "No-results path" behave as expected.
+- I will use **Claude** for this.
+- I'll give Claude the `## Planning Loop` section and the `## Architecture` diagram from `planning.md` as input.
+- I will ask it to implement the `run_agent()` function in `agent.py`, managing the `session` dictionary explicitly as shown in the diagram.
+- Before using it, I'll verify that the conditional logic checks for an empty `results` list after `search_listings` and correctly populates the session dictionary. I'll then test it via the CLI using the "Happy path" and "No-results path" test queries in `agent.py`.
 
 ---
 
